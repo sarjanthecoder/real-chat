@@ -13,7 +13,8 @@ import uuid
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-change-this'
-app.config['UPLOAD_FOLDER'] = 'uploads/images'
+# Use /tmp for Vercel serverless (read-only filesystem except /tmp)
+app.config['UPLOAD_FOLDER'] = '/tmp/uploads/images'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -24,12 +25,15 @@ socketio = SocketIO(app, cors_allowed_origins="*", ping_timeout=60, ping_interva
 def home():
     return render_template('main.html')
 
-# Create uploads folder if not exists
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# Create uploads folder if not exists (use /tmp on Vercel)
+try:
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+except OSError:
+    pass  # Read-only filesystem on serverless (Vercel) - skip
 
 # Database setup
 def init_db():
-    conn = sqlite3.connect('chat_app.db')
+    conn = sqlite3.connect('/tmp/chat_app.db')
     c = conn.cursor()
     
     # Users table
@@ -92,7 +96,7 @@ init_db()
 
 # Database helper functions
 def get_db():
-    conn = sqlite3.connect('chat_app.db')
+    conn = sqlite3.connect('/tmp/chat_app.db')
     conn.row_factory = sqlite3.Row
     return conn
 
