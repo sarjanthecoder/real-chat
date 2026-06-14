@@ -593,6 +593,12 @@
             border-bottom-left-radius: 4px;
         }
 
+        .message-bubble.is-deleted {
+            background: rgba(255, 255, 255, 0.05) !important;
+            border: 1px dashed rgba(255, 255, 255, 0.15) !important;
+            color: var(--text-dim) !important;
+        }
+
         /* Reply Message */
         .replied-to {
             background: rgba(0, 0, 0, 0.2);
@@ -800,8 +806,8 @@
             font-weight: 500;
         }
 
-        /* Reply Box */
-        .reply-box {
+        /* Reply & Edit Boxes */
+        .reply-box, .edit-box {
             display: none;
             background: var(--light-gray);
             padding: 12px 16px;
@@ -810,24 +816,24 @@
             position: relative;
         }
 
-        .reply-box.active {
+        .reply-box.active, .edit-box.active {
             display: block;
         }
 
-        .reply-box-header {
+        .reply-box-header, .edit-box-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 6px;
         }
 
-        .reply-box-title {
+        .reply-box-title, .edit-box-title {
             font-size: 12px;
             color: var(--primary);
             font-weight: 600;
         }
 
-        .reply-box-close {
+        .reply-box-close, .edit-box-close {
             background: transparent;
             border: none;
             color: var(--text-dim);
@@ -837,12 +843,65 @@
             line-height: 1;
         }
 
-        .reply-box-content {
+        .reply-box-content, .edit-box-content {
             font-size: 13px;
             color: var(--text-dim);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        /* Context Menu */
+        .context-menu {
+            position: fixed;
+            background: var(--gray);
+            border: 1px solid var(--light-gray);
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            z-index: 2500;
+            min-width: 180px;
+            overflow: hidden;
+            animation: scaleIn 0.2s ease;
+        }
+
+        @keyframes scaleIn {
+            from {
+                transform: scale(0.8);
+                opacity: 0;
+            }
+
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .context-menu-item {
+            padding: 14px 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: background 0.2s;
+            color: var(--text);
+            font-size: 14px;
+        }
+
+        .context-menu-item:hover {
+            background: var(--light-gray);
+        }
+
+        .context-menu-item.danger {
+            color: var(--danger);
+        }
+
+        .context-menu-item.danger:hover {
+            background: rgba(255, 71, 87, 0.1);
+        }
+
+        .context-menu-divider {
+            height: 1px;
+            background: var(--light-gray);
         }
 
         /* Media Preview Modal */
@@ -1095,7 +1154,7 @@
         }
 
         /* Mobile Responsive */
-        @media (max-width: 768px) {
+        @media (max-width: 992px) {
             body {
                 overflow: hidden;
                 position: fixed;
@@ -1222,6 +1281,15 @@
                 height: -webkit-fill-available;
             }
         }
+
+        /* Prevent selection for premium tap-and-hold experience on mobile */
+        .chat-item, .message {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+        }
     </style>
 </head>
 <body>
@@ -1263,6 +1331,10 @@
             <div class="form-group">
                 <label>Username (Unique ID)</label>
                 <input type="text" id="setupUsername" placeholder="dev_username">
+            </div>
+            <div class="form-group">
+                <label>Name (Display Name)</label>
+                <input type="text" id="setupDisplayName" placeholder="Attitude queen">
             </div>
             <div class="form-group">
                 <label>Profile Emoji/Image</label>
@@ -1319,11 +1391,10 @@
 
             <div id="chatContent" class="hidden" style="display: flex; flex-direction: column; height: 100%;">
                 <div class="chat-header-top">
-                    <button class="menu-btn" onclick="toggleSidebar()">
+                    <button class="menu-btn" onclick="toggleSidebar()" title="Go Back">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="3" y1="12" x2="21" y2="12"></line>
-                            <line x1="3" y1="6" x2="21" y2="6"></line>
-                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                            <line x1="19" y1="12" x2="5" y2="12"></line>
+                            <polyline points="12 19 5 12 12 5"></polyline>
                         </svg>
                     </button>
                     <div class="chat-avatar">
@@ -1353,6 +1424,14 @@
                             <button class="reply-box-close" onclick="cancelReply()">×</button>
                         </div>
                         <div class="reply-box-content" id="replyToContent"></div>
+                    </div>
+
+                    <div class="edit-box" id="editBox">
+                        <div class="edit-box-header">
+                            <span class="edit-box-title">Editing Message</span>
+                            <button class="edit-box-close" onclick="cancelEdit()">×</button>
+                        </div>
+                        <div class="edit-box-content" id="editToContent"></div>
                     </div>
                     
                     <div class="input-container">
@@ -1413,6 +1492,32 @@
             <div id="mediaPreviewElement"></div>
         </div>
     </div>
+    <!-- Context Menu -->
+    <div id="contextMenu" class="context-menu hidden">
+        <div class="context-menu-item" onclick="replyFromContext()">
+            <span>↩️</span> Reply
+        </div>
+        <div class="context-menu-item" id="editOptionContext" onclick="editFromContext()">
+            <span>✏️</span> Edit
+        </div>
+        <div class="context-menu-item" onclick="copyMessage()">
+            <span>📋</span> Copy
+        </div>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item danger" onclick="deleteFromContext('me')">
+            <span>🗑️</span> Delete for me
+        </div>
+        <div class="context-menu-item danger" id="deleteForEveryoneOption" onclick="deleteFromContext('everyone')">
+            <span>🗑️</span> Delete for everyone
+        </div>
+    </div>
+
+    <!-- Chat Item Context Menu -->
+    <div id="chatContextMenu" class="context-menu hidden">
+        <div class="context-menu-item danger" onclick="deleteChatFromContext()">
+            <span>🗑️</span> Delete Chat
+        </div>
+    </div>
 <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
@@ -1445,8 +1550,12 @@
     let currentMessagesRef = null; // NEW: Track message reference
     let typingTimeout = null;
     let chatListListener = null;
+    let activeStatusListener = null;
     let uploading = false;
     let replyingTo = null;
+    let editingMessageId = null;
+    let contextMenuMessageId = null;
+    let forwardMessageData = null;
     let allMessages = [];
     let renderedMessageIds = new Set();
     let isAtBottom = true;
@@ -1511,7 +1620,7 @@
         
         // Clean chat list
         if (chatListListener) {
-            off(chatListListener);
+            if (typeof chatListListener === 'function') chatListListener();
             chatListListener = null;
         }
         
@@ -1520,6 +1629,12 @@
             console.log("🧹 Removing message listeners from:", currentChatId);
             off(currentMessagesRef); // This removes ALL listeners from this ref
             currentMessagesRef = null;
+        }
+
+        // Clean active status listener
+        if (activeStatusListener) {
+            if (typeof activeStatusListener === 'function') activeStatusListener();
+            activeStatusListener = null;
         }
         
         currentChatId = null;
@@ -1646,6 +1761,7 @@
 
     window.completeProfileSetup = async () => {
         const username = document.getElementById('setupUsername').value.trim();
+        const displayName = document.getElementById('setupDisplayName').value.trim();
         const profileImage = document.getElementById('setupImage').value.trim() || '👨‍💻';
         const bio = document.getElementById('setupBio').value.trim();
         
@@ -1658,6 +1774,8 @@
             return;
         }
 
+        const finalDisplayName = displayName || username;
+
         try {
             const usernameRef = ref(database, `usernames/${username.toLowerCase()}`);
             const usernameSnap = await get(usernameRef);
@@ -1669,6 +1787,7 @@
             await set(ref(database, `users/${currentUser.uid}`), {
                 username,
                 username_lowercase: username.toLowerCase(),
+                displayName: finalDisplayName,
                 profileImage,
                 bio,
                 email: currentUser.email,
@@ -1677,7 +1796,7 @@
             
             await set(usernameRef, currentUser.uid);
             
-            showMainApp({ username, profileImage, bio });
+            showMainApp({ username, displayName: finalDisplayName, profileImage, bio });
             loadChats();
         } catch (error) {
             console.error("Profile setup error:", error);
@@ -1744,7 +1863,8 @@ window.handleLogout = async () => {
         if (!currentUser) return;
         
         if (chatListListener) {
-            off(chatListListener);
+            if (typeof chatListListener === 'function') chatListListener();
+            chatListListener = null;
         }
 
         const chatsRef = ref(database, `chats/${currentUser.uid}`);
@@ -1892,18 +2012,65 @@ window.handleLogout = async () => {
             chatItem.classList.add('has-unread');
         }
 
-        if (isSearchResult && chat.isNew) {
-            chatItem.onclick = async () => {
-                try {
-                    await createNewChat(chat.userId);
+        // Mobile hold and Desktop contextmenu for chats
+        let chatPressTimer;
+        let isLongPress = false;
+        let chatTouchStartX = 0;
+        let chatTouchStartY = 0;
+
+        const handleChatTouchStart = (e) => {
+            if (e.touches && e.touches.length > 1) return;
+            isLongPress = false;
+            chatTouchStartX = e.touches[0].clientX;
+            chatTouchStartY = e.touches[0].clientY;
+
+            clearTimeout(chatPressTimer);
+            chatPressTimer = setTimeout(() => {
+                isLongPress = true;
+                const coordinates = { clientX: chatTouchStartX, clientY: chatTouchStartY };
+                showChatContextMenu(coordinates, chat.userId);
+            }, 600);
+        };
+
+        const handleChatTouchMove = (e) => {
+            if (!e.touches || e.touches.length === 0) return;
+            const diffX = Math.abs(e.touches[0].clientX - chatTouchStartX);
+            const diffY = Math.abs(e.touches[0].clientY - chatTouchStartY);
+            if (diffX > 10 || diffY > 10) {
+                clearTimeout(chatPressTimer);
+            }
+        };
+
+        const handleChatTouchEnd = (e) => {
+            clearTimeout(chatPressTimer);
+            if (isLongPress) {
+                e.preventDefault();
+            }
+        };
+
+        chatItem.addEventListener('touchstart', handleChatTouchStart, { passive: false });
+        chatItem.addEventListener('touchmove', handleChatTouchMove, { passive: true });
+        chatItem.addEventListener('touchend', handleChatTouchEnd, { passive: false });
+
+        chatItem.addEventListener('click', (e) => {
+            if (isLongPress) {
+                isLongPress = false;
+                return;
+            }
+            if (isSearchResult && chat.isNew) {
+                createNewChat(chat.userId).then(() => {
                     selectChat(chat.userId, chat.userData);
-                } catch (error) {
+                }).catch(error => {
                     alert("Could not start chat");
-                }
-            };
-        } else {
-            chatItem.onclick = () => selectChat(chat.userId, chat.userData);
-        }
+                });
+            } else {
+                selectChat(chat.userId, chat.userData);
+            }
+        });
+
+        chatItem.addEventListener('contextmenu', (e) => {
+            showChatContextMenu(e, chat.userId);
+        });
 
         if (selectedChatUser && selectedChatUser.id === chat.userId) {
             chatItem.classList.add('active');
@@ -1922,7 +2089,7 @@ window.handleLogout = async () => {
             </div>
             <div class="chat-info">
                 <div class="chat-header">
-                    <span class="chat-name">${chat.userData?.username || 'Unknown'}</span>
+                    <span class="chat-name">${chat.userData?.displayName || chat.userData?.username || 'Unknown'}</span>
                     <div class="chat-meta">
                         <span class="chat-time">${time}</span>
                         ${unreadBadge}
@@ -1967,20 +2134,49 @@ window.handleLogout = async () => {
         }
 
         document.getElementById('chatUserAvatar').textContent = userData.profileImage || '👨‍💻';
-        document.getElementById('chatUserName').textContent = userData.username || 'User';
-        document.getElementById('chatUserStatus').textContent = 'Online';
+        document.getElementById('chatUserName').textContent = userData.displayName || userData.username || 'User';
+        
+        // Clean previous active status listener
+        if (activeStatusListener) {
+            if (typeof activeStatusListener === 'function') activeStatusListener();
+            activeStatusListener = null;
+        }
+
+        // Listen to selected user's status (presence & typing) in real-time
+        const statusRef = ref(database, `status/${userId}`);
+        activeStatusListener = onValue(statusRef, (snapshot) => {
+            const statusEl = document.getElementById('chatUserStatus');
+            if (!statusEl) return;
+
+            if (snapshot.exists()) {
+                const status = snapshot.val();
+                if (status.typing === true) {
+                    statusEl.textContent = 'typing...';
+                    statusEl.classList.add('typing');
+                } else if (status.online === true) {
+                    statusEl.textContent = 'Online';
+                    statusEl.classList.remove('typing');
+                } else {
+                    const lastSeenTime = formatLastSeen(status.lastSeen);
+                    statusEl.textContent = lastSeenTime ? `Last seen ${lastSeenTime}` : 'Offline';
+                    statusEl.classList.remove('typing');
+                }
+            } else {
+                statusEl.textContent = 'Offline';
+                statusEl.classList.remove('typing');
+            }
+        });
 
         loadMessages(userId);
 
         // Mobile view fix
-        if (window.innerWidth <= 768) {
+        if (window.innerWidth <= 992) {
             const sidebar = document.getElementById('sidebar');
             const chatArea = document.getElementById('chatArea');
             
             if (sidebar) sidebar.classList.add('hide-mobile');
             if (chatArea) {
                 chatArea.classList.add('show-mobile');
-                chatArea.style.display = 'flex';
             }
         }
     };
@@ -2058,7 +2254,7 @@ window.handleLogout = async () => {
             if (selectedChatUser?.id !== userId) return;
             
             const message = { id: snapshot.key, ...snapshot.val() };
-            updateMessageStatus(message);
+            renderMessage(message);
         });
     };
 
@@ -2083,28 +2279,13 @@ window.handleLogout = async () => {
     }
 
     window.renderMessage = (message) => {
-        if (renderedMessageIds.has(message.id)) return;
-        
-        const messagesContainer = document.getElementById('messagesContainer');
-        if (!messagesContainer) return;
-
-        renderedMessageIds.add(message.id);
-
         const isSent = message.senderId === currentUser.uid;
-
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
-        messageDiv.id = `message-${message.id}`;
-        messageDiv.setAttribute('data-message-id', message.id);
-        messageDiv.setAttribute('data-message-text', message.text || '📷 Image');
-        messageDiv.setAttribute('data-sender-name', isSent ? 'You' : selectedChatUser?.username);
-
         const avatar = isSent ?
             document.getElementById('currentUserAvatar')?.textContent || '👨‍💻' :
             selectedChatUser?.profileImage || '👨‍💻';
 
         let statusIcon = '';
-        if (isSent) {
+        if (isSent && !message.isDeleted) {
             if (message.readTime) {
                 statusIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00ff88" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline><polyline points="16 6 5 17 0 12"></polyline></svg>';
             } else if (message.deliveredTime) {
@@ -2115,12 +2296,12 @@ window.handleLogout = async () => {
         }
 
         let mediaContent = '';
-        if (message.imageUrl) {
+        if (message.imageUrl && !message.isDeleted) {
             mediaContent = `<img src="${message.imageUrl}" class="message-image" alt="Image" onclick="openMediaPreview('${message.imageUrl}')" />`;
         }
 
         let replyContent = '';
-        if (message.replyTo) {
+        if (message.replyTo && !message.isDeleted) {
             replyContent = `
                 <div class="replied-to">
                     <div class="replied-to-name">${message.replyTo.senderName}</div>
@@ -2129,28 +2310,121 @@ window.handleLogout = async () => {
             `;
         }
 
-        const textContent = message.text ? `<div class="message-text">${escapeHtml(message.text)}</div>` : '';
+        let textContent = '';
+        const deletedText = isSent ? 
+            '🚫 You deleted this message' : 
+            `🚫 This message was deleted by ${selectedChatUser?.displayName || selectedChatUser?.username || 'user'}`;
 
-        messageDiv.innerHTML = `
+        if (message.isDeleted) {
+            textContent = `<div class="message-text" style="font-style: italic; color: var(--text-dim);">${deletedText}</div>`;
+        } else {
+            textContent = message.text ? `<div class="message-text">${escapeHtml(message.text)}</div>` : '';
+        }
+
+        const actionButtons = message.isDeleted ? '' : `
+            <div class="message-actions">
+                <button class="message-action-btn" onclick="replyToMessage('${message.id}')">Reply</button>
+                ${isSent && message.text ? `<button class="message-action-btn edit" onclick="startEditMessage('${message.id}')">Edit</button>` : ''}
+                ${isSent ? `<button class="message-action-btn delete" onclick="deleteMessage('${message.id}', 'everyone')">Del All</button>` : ''}
+                <button class="message-action-btn delete" onclick="deleteMessage('${message.id}', 'me')">Del Me</button>
+            </div>
+        `;
+
+        const bubbleClass = message.isDeleted ? 'message-bubble is-deleted' : 'message-bubble';
+
+        const innerHTML = `
             <div class="message-avatar">${avatar}</div>
             <div class="message-content">
-                <div class="message-bubble">
+                <div class="${bubbleClass}">
                     ${replyContent}
                     ${textContent}
                     ${mediaContent}
                 </div>
                 <div class="message-footer">
-                    <span>${formatTime(message.timestamp)}</span>
-                    ${isSent ? `<span class="message-status">${statusIcon}</span>` : ''}
+                    <span>${formatTime(message.timestamp)}${message.isEdited ? '<span class="edited-label" style="font-size: 10px; color: var(--text-dim); opacity: 0.8; margin-left: 4px;">(edited)</span>' : ''}</span>
+                    ${isSent && !message.isDeleted ? `<span class="message-status">${statusIcon}</span>` : ''}
                 </div>
-                <div class="message-actions">
-                    <button class="message-action-btn" onclick="replyToMessage('${message.id}')">Reply</button>
-                    ${isSent ? `<button class="message-action-btn delete" onclick="deleteMessage('${message.id}', 'everyone')">Del All</button>` : ''}
-                    <button class="message-action-btn delete" onclick="deleteMessage('${message.id}', 'me')">Del Me</button>
-                </div>
+                ${actionButtons}
             </div>
         `;
-        
+
+        const existingEl = document.getElementById(`message-${message.id}`);
+        if (existingEl) {
+            existingEl.innerHTML = innerHTML;
+            existingEl.setAttribute('data-message-text', message.isDeleted ? deletedText : (message.text || '📷 Image'));
+            const bubble = existingEl.querySelector('.message-bubble');
+            if (bubble) {
+                if (message.isDeleted) {
+                    bubble.className = 'message-bubble is-deleted';
+                    bubble.style.background = '';
+                    bubble.style.padding = '';
+                } else {
+                    bubble.className = 'message-bubble';
+                }
+            }
+            return;
+        }
+
+        const messagesContainer = document.getElementById('messagesContainer');
+        if (!messagesContainer) return;
+
+        renderedMessageIds.add(message.id);
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
+        messageDiv.id = `message-${message.id}`;
+        messageDiv.setAttribute('data-message-id', message.id);
+        messageDiv.setAttribute('data-message-text', message.isDeleted ? deletedText : (message.text || '📷 Image'));
+        messageDiv.setAttribute('data-sender-name', isSent ? 'You' : selectedChatUser?.username);
+        messageDiv.innerHTML = innerHTML;
+
+        // Custom Long Press Context Menu for Mobile Hold & Desktop Right-click
+        let pressTimer;
+        let isMessageLongPress = false;
+        let messageTouchStartX = 0;
+        let messageTouchStartY = 0;
+
+        const handleStart = (e) => {
+            if (message.isDeleted) return;
+            if (e.touches && e.touches.length > 1) return;
+            isMessageLongPress = false;
+            messageTouchStartX = e.touches[0].clientX;
+            messageTouchStartY = e.touches[0].clientY;
+
+            clearTimeout(pressTimer);
+
+            pressTimer = setTimeout(() => {
+                isMessageLongPress = true;
+                const coordinates = { clientX: messageTouchStartX, clientY: messageTouchStartY };
+                showContextMenu(coordinates, message.id, isSent, message.text, message.imageUrl);
+            }, 600);
+        };
+
+        const handleMove = (e) => {
+            if (!e.touches || e.touches.length === 0) return;
+            const diffX = Math.abs(e.touches[0].clientX - messageTouchStartX);
+            const diffY = Math.abs(e.touches[0].clientY - messageTouchStartY);
+            if (diffX > 10 || diffY > 10) {
+                clearTimeout(pressTimer);
+            }
+        };
+
+        const handleEnd = (e) => {
+            clearTimeout(pressTimer);
+            if (isMessageLongPress) {
+                e.preventDefault();
+            }
+        };
+
+        messageDiv.addEventListener('touchstart', handleStart, { passive: false });
+        messageDiv.addEventListener('touchmove', handleMove, { passive: true });
+        messageDiv.addEventListener('touchend', handleEnd, { passive: false });
+
+        messageDiv.addEventListener('contextmenu', (e) => {
+            if (message.isDeleted) return;
+            showContextMenu(e, message.id, isSent, message.text, message.imageUrl);
+        });
+
         messagesContainer.appendChild(messageDiv);
 
         if (!isSent) {
@@ -2188,6 +2462,37 @@ window.handleLogout = async () => {
         document.getElementById('replyBox').classList.remove('active');
     };
 
+    window.startEditMessage = (messageId) => {
+        const messageEl = document.getElementById(`message-${messageId}`);
+        if (!messageEl) return;
+
+        cancelReply();
+
+        const messageText = messageEl.getAttribute('data-message-text');
+        editingMessageId = messageId;
+
+        const editBox = document.getElementById('editBox');
+        const editToContent = document.getElementById('editToContent');
+        if (editToContent) editToContent.textContent = messageText;
+        if (editBox) editBox.classList.add('active');
+
+        const input = document.getElementById('messageInput');
+        if (input) {
+            input.value = messageText;
+            input.focus();
+        }
+    };
+
+    window.cancelEdit = () => {
+        editingMessageId = null;
+        const editBox = document.getElementById('editBox');
+        if (editBox) editBox.classList.remove('active');
+        const input = document.getElementById('messageInput');
+        if (input) {
+            input.value = '';
+        }
+    };
+
     // *** FIXED: Send Message with Auto-Clear ***
 window.sendMessage = async () => {
     const input = document.getElementById('messageInput');
@@ -2221,7 +2526,40 @@ window.sendMessage = async () => {
     input.value = '';
     input.focus();
     
+    // Clear typing status in database
+    setTypingStatus(false);
+    if (typingTimeout) clearTimeout(typingTimeout);
+    
     const chatId = getChatId(currentUser.uid, selectedChatUser.id);
+
+    if (editingMessageId) {
+        const messageIdToEdit = editingMessageId;
+        cancelEdit();
+
+        try {
+            const messageRef = ref(database, `messages/${chatId}/${messageIdToEdit}`);
+            await update(messageRef, {
+                text: text,
+                isEdited: true
+            });
+
+            await updateLastMessage(selectedChatUser.id, text);
+            try {
+                const recipientChatRef = ref(database, `chats/${selectedChatUser.id}/${currentUser.uid}`);
+                await update(recipientChatRef, {
+                    lastMessage: text,
+                    lastMessageTime: Date.now()
+                });
+            } catch (err) {
+                console.log("Recipient last message update error:", err);
+            }
+        } catch (error) {
+            console.error("Edit message error:", error);
+            alert("Failed to edit message");
+        }
+        return;
+    }
+    
     console.log("💬 Sending to chat:", chatId);
     
     const messagesRef = ref(database, `messages/${chatId}`);
@@ -2364,9 +2702,26 @@ window.sendMessage = async () => {
             if (type === 'everyone') {
                 const msgSnap = await get(messageRef);
                 if (msgSnap.exists() && msgSnap.val().senderId === currentUser.uid) {
-                    await remove(messageRef);
-                    document.getElementById(`message-${messageId}`)?.remove();
-                    renderedMessageIds.delete(messageId);
+                    await update(messageRef, {
+                        text: '🚫 This message was deleted',
+                        imageUrl: null,
+                        replyTo: null,
+                        isDeleted: true
+                    });
+                    
+                    const senderUsername = document.getElementById('currentUserName')?.textContent || 'User';
+                    // Update last message in sender's chat list
+                    await updateLastMessage(selectedChatUser.id, '🚫 You deleted a message');
+                    // Update last message in recipient's chat list
+                    try {
+                        const recipientChatRef = ref(database, `chats/${selectedChatUser.id}/${currentUser.uid}`);
+                        await update(recipientChatRef, {
+                            lastMessage: `🚫 ${senderUsername} deleted a message`,
+                            lastMessageTime: Date.now()
+                        });
+                    } catch (err) {
+                        console.log("Recipient last message update error:", err);
+                    }
                 } else {
                     alert("Can't delete others' messages");
                 }
@@ -2380,11 +2735,30 @@ window.sendMessage = async () => {
         }
     };
 
+    const setTypingStatus = async (isTyping) => {
+        if (!currentUser) return;
+        try {
+            const statusRef = ref(database, `status/${currentUser.uid}/typing`);
+            await set(statusRef, isTyping);
+        } catch (error) {
+            console.log("Error setting typing status:", error);
+        }
+    };
+
     window.handleTyping = (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
             sendMessage();
+            setTypingStatus(false);
+            return;
         }
+
+        setTypingStatus(true);
+
+        if (typingTimeout) clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+            setTypingStatus(false);
+        }, 2000);
     };
 
     window.createNewChat = async (userId) => {
@@ -2421,6 +2795,24 @@ window.sendMessage = async () => {
         return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
+    window.formatLastSeen = (ts) => {
+        if (!ts) return '';
+        const date = new Date(ts);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        
+        if (diffDays === 0) {
+            // Today
+            return `today at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        } else if (diffDays === 1) {
+            // Yesterday
+            return `yesterday at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        } else {
+            return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' at ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+    };
+
     window.scrollToBottom = (force = false) => {
         const c = document.getElementById('messagesContainer');
         if (c && (force || isAtBottom)) {
@@ -2439,9 +2831,191 @@ window.sendMessage = async () => {
     };
 
     window.toggleSidebar = () => {
-        if (window.innerWidth <= 768) {
+        if (window.innerWidth <= 992) {
             document.getElementById('sidebar')?.classList.remove('hide-mobile');
-            document.getElementById('chatArea')?.classList.remove('show-mobile');
+            const chatArea = document.getElementById('chatArea');
+            if (chatArea) {
+                chatArea.classList.remove('show-mobile');
+                chatArea.style.display = '';
+            }
+        }
+    };
+
+    // *** CONTEXT MENU ***
+    window.showContextMenu = (e, messageId, isSent, text, imageUrl) => {
+        if (e) {
+            if (typeof e.preventDefault === 'function') {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }
+        contextMenuMessageId = messageId;
+        forwardMessageData = { messageId, text, imageUrl };
+
+        const menu = document.getElementById('contextMenu');
+        const deleteForEveryone = document.getElementById('deleteForEveryoneOption');
+        const editOptionContext = document.getElementById('editOptionContext');
+
+        // Only show "delete for everyone" for own messages
+        deleteForEveryone.style.display = isSent ? 'flex' : 'none';
+        
+        // Only show "edit" option for own text messages
+        if (editOptionContext) {
+            editOptionContext.style.display = (isSent && text) ? 'flex' : 'none';
+        }
+
+        // Position menu
+        let x = 100;
+        let y = 100;
+        if (e) {
+            if (e.touches && e.touches.length > 0) {
+                x = e.touches[0].clientX;
+                y = e.touches[0].clientY;
+            } else if (e.changedTouches && e.changedTouches.length > 0) {
+                x = e.changedTouches[0].clientX;
+                y = e.changedTouches[0].clientY;
+            } else {
+                x = e.clientX;
+                y = e.clientY;
+            }
+        }
+
+        // Keep in viewport
+        if (x + 200 > window.innerWidth) x = window.innerWidth - 210;
+        if (y + 250 > window.innerHeight) y = window.innerHeight - 260;
+
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.classList.remove('hidden');
+    };
+
+    window.hideContextMenu = () => {
+        document.getElementById('contextMenu').classList.add('hidden');
+        contextMenuMessageId = null;
+    };
+
+    let contextMenuChatUserId = null;
+
+    window.showChatContextMenu = (e, userId) => {
+        if (e && typeof e.preventDefault === 'function') {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        contextMenuChatUserId = userId;
+
+        const menu = document.getElementById('chatContextMenu');
+        if (!menu) return;
+
+        // Position menu
+        let x = 100;
+        let y = 100;
+        if (e) {
+            if (e.touches && e.touches.length > 0) {
+                x = e.touches[0].clientX;
+                y = e.touches[0].clientY;
+            } else if (e.changedTouches && e.changedTouches.length > 0) {
+                x = e.changedTouches[0].clientX;
+                y = e.changedTouches[0].clientY;
+            } else {
+                x = e.clientX;
+                y = e.clientY;
+            }
+        }
+
+        // Keep in viewport
+        if (x + 200 > window.innerWidth) x = window.innerWidth - 210;
+        if (y + 100 > window.innerHeight) y = window.innerHeight - 110;
+
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.classList.remove('hidden');
+    };
+
+    window.hideChatContextMenu = () => {
+        const menu = document.getElementById('chatContextMenu');
+        if (menu) menu.classList.add('hidden');
+        contextMenuChatUserId = null;
+    };
+
+    window.deleteChatFromContext = () => {
+        const userId = contextMenuChatUserId;
+        hideChatContextMenu();
+        if (userId) {
+            deleteChat(userId);
+        }
+    };
+
+    window.deleteChat = async (userId) => {
+        if (!currentUser || !userId) return;
+        if (confirm("Are you sure you want to delete this chat? This will remove it from your chat list.")) {
+            try {
+                const { remove, ref } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js');
+                await remove(ref(database, `chats/${currentUser.uid}/${userId}`));
+                
+                if (selectedChatUser && selectedChatUser.id === userId) {
+                    selectedChatUser = null;
+                    const emptyState = document.getElementById('emptyState');
+                    const chatContent = document.getElementById('chatContent');
+                    if (emptyState) emptyState.classList.remove('hidden');
+                    if (chatContent) {
+                        chatContent.classList.add('hidden');
+                        chatContent.style.display = 'none';
+                    }
+                    const messagesContainer = document.getElementById('messagesContainer');
+                    if (messagesContainer) messagesContainer.innerHTML = '';
+                }
+            } catch (error) {
+                console.error("Error deleting chat:", error);
+                alert("Failed to delete chat.");
+            }
+        }
+    };
+
+    // Hide context menus on click outside
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('contextMenu');
+        if (menu && !menu.contains(e.target)) {
+            hideContextMenu();
+        }
+        const chatMenu = document.getElementById('chatContextMenu');
+        if (chatMenu && !chatMenu.contains(e.target)) {
+            hideChatContextMenu();
+        }
+    });
+
+    // Hide menus on scroll
+    window.addEventListener('scroll', () => {
+        hideContextMenu();
+        hideChatContextMenu();
+    }, true);
+
+    window.replyFromContext = () => {
+        hideContextMenu();
+        if (contextMenuMessageId) {
+            replyToMessage(contextMenuMessageId);
+        }
+    };
+
+    window.editFromContext = () => {
+        hideContextMenu();
+        if (contextMenuMessageId) {
+            startEditMessage(contextMenuMessageId);
+        }
+    };
+
+    window.copyMessage = () => {
+        hideContextMenu();
+        if (forwardMessageData?.text) {
+            navigator.clipboard.writeText(forwardMessageData.text).then(() => {
+                console.log('Message copied');
+            });
+        }
+    };
+
+    window.deleteFromContext = (type) => {
+        hideContextMenu();
+        if (contextMenuMessageId) {
+            deleteMessage(contextMenuMessageId, type);
         }
     };
 

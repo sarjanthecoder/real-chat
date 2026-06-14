@@ -78,6 +78,12 @@ def init_db():
         last_seen BIGINT,
         FOREIGN KEY (user_id) REFERENCES users(id)
     )''')
+
+    # Migration: Add display_name column to users table if not exists
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN display_name TEXT")
+    except sqlite3.OperationalError:
+        pass
     
     conn.commit()
     conn.close()
@@ -192,7 +198,7 @@ def profile(current_user_id):
     c = conn.cursor()
     
     if request.method == 'GET':
-        c.execute('SELECT id, email, username, profile_image, bio FROM users WHERE id = ?', 
+        c.execute('SELECT id, email, username, display_name, profile_image, bio FROM users WHERE id = ?', 
                   (current_user_id,))
         user = c.fetchone()
         conn.close()
@@ -200,12 +206,17 @@ def profile(current_user_id):
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        return jsonify(dict(user)), 200
+        # Ensure compatibility with both camelCase and snake_case
+        user_dict = dict(user)
+        user_dict['displayName'] = user_dict.get('display_name')
+        user_dict['profileImage'] = user_dict.get('profile_image')
+        return jsonify(user_dict), 200
     
     elif request.method == 'POST':
         data = request.get_json()
         username = data.get('username')
-        profile_image = data.get('profile_image', '👨‍💻')
+        display_name = data.get('displayName') or data.get('display_name')
+        profile_image = data.get('profile_image', '👨‍💻') or data.get('profileImage', '👨‍💻')
         bio = data.get('bio', '')
         
         if not username:
@@ -220,15 +231,17 @@ def profile(current_user_id):
         
         # Update profile
         c.execute('''UPDATE users 
-                     SET username = ?, profile_image = ?, bio = ? 
+                     SET username = ?, display_name = ?, profile_image = ?, bio = ? 
                      WHERE id = ?''',
-                  (username, profile_image, bio, current_user_id))
+                  (username, display_name, profile_image, bio, current_user_id))
         conn.commit()
         conn.close()
         
         return jsonify({
             'message': 'Profile updated successfully',
             'username': username,
+            'displayName': display_name,
+            'display_name': display_name,
             'profile_image': profile_image,
             'bio': bio
         }), 200
@@ -245,13 +258,18 @@ def search_users(current_user_id):
     conn = get_db()
     c = conn.cursor()
     
-    c.execute('''SELECT id, username, profile_image, bio 
+    c.execute('''SELECT id, username, display_name, profile_image, bio 
                  FROM users 
                  WHERE username LIKE ? AND id != ? AND username IS NOT NULL
                  LIMIT 20''',
               (f'%{query}%', current_user_id))
     
-    users = [dict(row) for row in c.fetchall()]
+    users = []
+    for row in c.fetchall():
+        user = dict(row)
+        user['displayName'] = user.get('display_name')
+        user['profileImage'] = user.get('profile_image')
+        users.append(user)
     
     # Get online status for each user
     for user in users:
@@ -275,7 +293,7 @@ def get_user(current_user_id, user_id):
     conn = get_db()
     c = conn.cursor()
     
-    c.execute('SELECT id, username, profile_image, bio FROM users WHERE id = ?', 
+    c.execute('SELECT id, username, display_name, profile_image, bio FROM users WHERE id = ?', 
               (user_id,))
     user = c.fetchone()
     
@@ -284,6 +302,8 @@ def get_user(current_user_id, user_id):
         return jsonify({'error': 'User not found'}), 404
     
     user_data = dict(user)
+    user_data['displayName'] = user_data.get('display_name')
+    user_data['profileImage'] = user_data.get('profile_image')
     
     # Get status
     c.execute('SELECT online, last_seen FROM user_status WHERE user_id = ?', (user_id,))
@@ -307,7 +327,7 @@ def get_chats(current_user_id):
     c = conn.cursor()
     
     c.execute('''SELECT c.chat_user_id, c.last_message, c.last_message_time,
-                     u.username, u.profile_image, u.bio,
+                     u.username, u.display_name, u.profile_image, u.bio,
                      s.online, s.last_seen
                  FROM chats c
                  JOIN users u ON c.chat_user_id = u.id
@@ -320,6 +340,14 @@ def get_chats(current_user_id):
     for row in c.fetchall():
         chat = dict(row)
         chat['online'] = bool(chat['online']) if chat['online'] is not None else False
+        chat['displayName'] = chat.get('display_name')
+        chat['profileImage'] = chat.get('profile_image')
+        chat['userData'] = {
+            'username': chat.get('username'),
+            'displayName': chat.get('display_name'),
+            'profileImage': chat.get('profile_image'),
+            'bio': chat.get('bio')
+        }
         chats.append(chat)
     
     conn.close()
