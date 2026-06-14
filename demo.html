@@ -31,6 +31,7 @@
             color: var(--text);
             height: 100vh;
             overflow: hidden;
+            overscroll-behavior: none; /* prevent pull-to-refresh */
         }
 
         .container {
@@ -506,6 +507,8 @@
             display: flex;
             flex-direction: column;
             gap: 16px;
+            overscroll-behavior: contain; /* prevent pull-to-refresh reload */
+            touch-action: pan-y;
         }
 
         .message {
@@ -1160,6 +1163,7 @@
                 position: fixed;
                 width: 100%;
                 height: 100%;
+                overscroll-behavior: none; /* prevent pull-to-refresh on mobile */
             }
 
             .container {
@@ -1236,6 +1240,9 @@
                 gap: 12px;
                 -webkit-overflow-scrolling: touch;
                 padding-bottom: 20px;
+                overscroll-behavior: contain; /* prevent pull-to-refresh page reload */
+                overscroll-behavior-y: contain;
+                touch-action: pan-y;
             }
 
             .message {
@@ -1289,6 +1296,63 @@
             -ms-user-select: none;
             user-select: none;
             -webkit-touch-callout: none;
+        }
+        /* *** NOTIFICATION TOAST *** */
+        .notif-toast {
+            position: fixed;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-80px);
+            background: rgba(20, 25, 50, 0.92);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 212, 255, 0.25);
+            border-radius: 18px;
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            z-index: 9999;
+            max-width: 340px;
+            width: calc(100% - 32px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,212,255,0.1);
+            cursor: pointer;
+            animation: toastSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+                       toastSlideOut 0.3s ease-in 3.7s forwards;
+        }
+        .notif-toast-avatar {
+            font-size: 28px;
+            flex-shrink: 0;
+            width: 42px;
+            height: 42px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,212,255,0.12);
+            border-radius: 50%;
+        }
+        .notif-toast-body {
+            flex: 1;
+            min-width: 0;
+        }
+        .notif-toast-name {
+            font-weight: 700;
+            font-size: 14px;
+            color: #00d4ff;
+            margin-bottom: 2px;
+        }
+        .notif-toast-text {
+            font-size: 13px;
+            color: rgba(255,255,255,0.75);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        @keyframes toastSlideIn {
+            to { transform: translateX(-50%) translateY(0); }
+        }
+        @keyframes toastSlideOut {
+            to { transform: translateX(-50%) translateY(-100px); opacity: 0; }
         }
     </style>
 </head>
@@ -1522,6 +1586,7 @@
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
     import { getDatabase, ref, set, get, onValue, push, remove, update, query, orderByChild, limitToLast, off, onDisconnect, onChildAdded, onChildChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+    import { getMessaging, getToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging.js';
 
     const firebaseConfig = {
         apiKey: "AIzaSyA7mpyGe9VerX6ucQO14gTayWbjv91ZT3Y",
@@ -1540,8 +1605,95 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const database = getDatabase(app);
+    let messaging = null;
+    try { messaging = getMessaging(app); } catch(e) { console.warn('FCM not supported:', e); }
 
     console.log("🔥 Firebase initialized");
+
+    // *** VAPID KEY — get from Firebase Console > Project Settings > Cloud Messaging ***
+    const VAPID_KEY = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDkBWssQLPWSO4QrLHFzYXUh6Gj3FLmj-j_1tWAhWPH4';
+
+    // *** PUSH NOTIFICATION SETUP ***
+    const initNotifications = async () => {
+        if (!messaging || !currentUser) return;
+
+        try {
+            // Register service worker
+            let swReg = null;
+            if ('serviceWorker' in navigator) {
+                swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+            }
+
+            // Request permission
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+                console.log('🔔 Notification permission denied');
+                return;
+            }
+
+            // Get FCM token
+            const token = await getToken(messaging, {
+                vapidKey: VAPID_KEY,
+                serviceWorkerRegistration: swReg
+            });
+
+            if (token) {
+                // Save token to Firebase under user's profile
+                await set(ref(database, `users/${currentUser.uid}/fcmToken`), token);
+                console.log('🔔 FCM token saved:', token.substring(0, 20) + '...');
+            }
+
+            // Handle FOREGROUND messages (app open but tab not visible or in another tab)
+            onMessage(messaging, (payload) => {
+                console.log('🔔 Foreground message:', payload);
+                const { title, body } = payload.notification || {};
+                showPushNotification(title || 'New Message', body || '');
+            });
+
+        } catch (err) {
+            console.warn('🔔 Notification setup error:', err);
+        }
+    };
+
+    // Show a browser notification (foreground fallback)
+    const showPushNotification = (title, body, icon = '💬') => {
+        // Only show if tab is hidden / not focused
+        if (document.hidden || !document.hasFocus()) {
+            if (Notification.permission === 'granted') {
+                const n = new Notification(title, {
+                    body,
+                    icon: '/icon-192x192.png',
+                    badge: '/icon-192x192.png',
+                    tag: 'devchat-msg',
+                    renotify: true,
+                    vibrate: [200, 100, 200]
+                });
+                n.onclick = () => { window.focus(); n.close(); };
+            }
+        }
+    };
+
+    // Show in-app toast notification (when app is visible)
+    const showInAppToast = (senderName, message) => {
+        if (document.hidden) return; // handled by push
+        // Don't show if this is the currently open chat
+        if (selectedChatUser && message.senderId === selectedChatUser.id) return;
+
+        const toast = document.createElement('div');
+        toast.className = 'notif-toast';
+        toast.innerHTML = `
+            <div class="notif-toast-avatar">💬</div>
+            <div class="notif-toast-body">
+                <div class="notif-toast-name">${senderName}</div>
+                <div class="notif-toast-text">${message.text || '📷 Image'}</div>
+            </div>
+        `;
+        toast.onclick = () => {
+            toast.remove();
+        };
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 4000);
+    };
 
     // *** STATE VARIABLES ***
     let currentUser = null;
@@ -1656,6 +1808,7 @@
                     if (userData.username) {
                         showMainApp(userData);
                         loadChats();
+                        initNotifications(); // 🔔 Setup push notifications
                     } else {
                         showProfileSetup();
                     }
@@ -1911,6 +2064,47 @@ window.handleLogout = async () => {
         });
     };
 
+    // *** GLOBAL INCOMING MESSAGE LISTENER (for notifications) ***
+    let incomingListeners = {};
+    const listenForIncomingMessages = (chatUserId) => {
+        if (incomingListeners[chatUserId]) return; // already listening
+
+        const [uid1, uid2] = [currentUser.uid, chatUserId].sort();
+        const chatId = `${uid1}_${uid2}`;
+        const msgsRef = ref(database, `messages/${chatId}`);
+        const q = query(msgsRef, orderByChild('timestamp'), limitToLast(1));
+
+        let initialized = false;
+        const unsub = onValue(q, async (snap) => {
+            if (!snap.exists()) { initialized = true; return; }
+            if (!initialized) { initialized = true; return; } // skip first load
+
+            snap.forEach((child) => {
+                const msg = { id: child.key, ...child.val() };
+                // Only notify for messages sent TO current user (not by us)
+                if (msg.senderId === currentUser.uid) return;
+                // Don't show if this exact chat is currently open
+                if (selectedChatUser?.id === chatUserId) return;
+
+                // Get sender name
+                get(ref(database, `users/${chatUserId}`)).then(uSnap => {
+                    const senderName = uSnap.val()?.displayName || uSnap.val()?.username || 'Someone';
+                    const msgText = msg.text || (msg.imageUrl ? '📷 Image' : '🎵 Voice');
+
+                    // In-app toast
+                    showInAppToast(senderName, msg);
+
+                    // Browser notification if tab not focused
+                    showPushNotification(`💬 ${senderName}`, msgText);
+                });
+            });
+        });
+
+        incomingListeners[chatUserId] = unsub;
+    };
+
+
+
     // Search Users
     window.handleSearch = async () => {
         if (searchTimeout) clearTimeout(searchTimeout);
@@ -2003,6 +2197,9 @@ window.handleLogout = async () => {
         if (!chatsList) return;
 
         if (document.getElementById(`chat-item-${chat.userId}`)) return;
+
+        // Start listening for notifications from this chat user
+        if (!isSearchResult) listenForIncomingMessages(chat.userId);
 
         const chatItem = document.createElement('div');
         chatItem.className = 'chat-item';
